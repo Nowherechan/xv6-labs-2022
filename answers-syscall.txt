@@ -1,0 +1,20 @@
+> Looking at the backtrace output, which function called syscall?
+kernel/trap.c:67
+
+> What is the value of p->trapframe->a7 and what does that value represent?
+0x7; means "exec" syscall
+
+> What was the previous mode that the CPU was in?
+user mode maybe. (IDK)
+
+> Write down the assembly instruction the kernel is panicing at. Which register corresponds to the varialable num?
+lw s2, 0(zero)
+s2
+
+> Why does the kernel crash?
+addr 0 is reserved
+
+> What is the name of the binary that was running when the kernel paniced? What is its process id (pid)?
+name: initcode
+pid: 1
+
