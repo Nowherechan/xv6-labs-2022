@@ -1,1 +1,8 @@
 # cv6-labs-2022
+
+This repo contains my solution to the labs for MIT's 6.S081 course.
+
+## Lab Rreports
+
+- [Lab Utilties](./reports/util.md)
+- [Lab System calls](./reports/syscall.md)
