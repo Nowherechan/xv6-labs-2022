@@ -1,0 +1,7 @@
+> Which other xv6 system call(s) could be made faster using this shared page? Explain how.
+
+Idk. Getpid just return something and do nothing to the system, so maybe there is another syscall act like this, and then it can be made faster in the same way.
+
+> Explain the output of vmprint in terms of Fig 3-4 from the text. What does page 0 contain? What is in page 2? When running in user mode, could the process read/write the memory mapped by page 1? What does the third to last page contain?
+
+Where is Fig 3-4? Maybe I can answer it later.
