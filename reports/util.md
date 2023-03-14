@@ -13,4 +13,4 @@
 [commit](https://github.com/Nowherechan/xv6-labs-2022/commit/5170662d776ebf9ff3cb42580d782efa0fc874fb)
 
 ## xargs
-[commit](https://github.com/Nowherechan/xv6-labs-2022/commit/cdbe37735b648d3d6bfdce73cd1d95b585169451)
+[commit](https://github.com/Nowherechan/xv6-labs-2022/commit/53555e4a85d51f56fd0aab8643efa3fc83cd8a45)
