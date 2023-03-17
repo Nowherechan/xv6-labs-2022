@@ -1,0 +1,25 @@
+> Which registers contain arguments to functions? For example, which register holds 13 in main's call to printf?
+
+13->a2, f(8)+1->a1, format-string->a0.
+
+> Where is the call to function f in the assembly code for main? Where is the call to g? (Hint: the compiler may inline functions.)
+
+li	a1,12; 8+3+1=12.
+
+> At what address is the function printf located?
+
+jalr	1536(ra); ra:0x0; 1536
+
+> What value is in the register ra just after the jalr to printf in main?
+
+idk
+
+> ...What is the output? ...If the RISC-V were instead big-endian what would you set i to in order to yield the same output? Would you need to change 57616 to a different value?
+
+He110 World;
+low -> high: 10 e1 00 00 big-endian: 283181056
+low -> high: 72 6c 64 00 big-endian: 0x726c6400
+
+> In the following code, what is going to be printed after 'y='? (note: the answer is not a specific value.) Why does this happen?`printf("x=%d y=%d", 3);`
+
+A strange number; no a third argument, using the uninitialized value in the register a2.
