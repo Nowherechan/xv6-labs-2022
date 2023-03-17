@@ -133,3 +133,16 @@ printfinit(void)
   initlock(&pr.lock, "pr");
   pr.locking = 1;
 }
+
+void
+backtrace(void) // For lab-4 Backtrace
+{
+  uint64 fp /* frame pointer */ = r_fp(),
+         ba /* base addr */ = PGROUNDUP(fp);
+
+  printf("backtrace:\n");
+  while (fp < ba) {
+    printf("%p\n", *(uint64*)(fp-8));
+    fp = *(uint64*)(fp-16);
+  }
+}
