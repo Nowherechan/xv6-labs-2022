@@ -132,6 +132,9 @@ found:
     return 0;
   }
 
+  // Assign trapframe + 512 to trapframe_bak
+  p->trapframe_bak = p->trapframe + 512;
+
   // An empty user page table.
   p->pagetable = proc_pagetable(p);
   if(p->pagetable == 0){
@@ -146,6 +149,12 @@ found:
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
 
+  // For lab alarm
+  p->alarm_handler = 0;
+  p->alarm_interval = 0;
+  p->alarm_enabled = 0;
+  p->alarm_processing = 0;
+  p->ticks_passed = 0;
   return p;
 }
 

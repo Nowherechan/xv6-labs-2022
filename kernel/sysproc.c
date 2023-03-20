@@ -91,3 +91,38 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+
+uint64
+sys_sigalarm(void)
+{
+  int ticks;
+  uint64 handler;
+  argint(0, &ticks);
+  argaddr(1, &handler);
+
+  struct proc *p = myproc();
+  if (!(handler || ticks)) {
+    p->alarm_enabled = 0;
+  } else {
+    p->alarm_enabled = 1;
+  }
+  p->alarm_handler = (void*)handler;
+  p->alarm_interval = ticks;
+  p->ticks_passed = 0;
+  p->alarm_processing = 0;
+  return 0;
+}
+
+uint64
+sys_sigreturn(void)
+{ 
+  struct proc *p = myproc();
+  // First 5 register are associated with kernel (except epc) so they should not be restored.
+  // 5 * 8 (64 bits = 8 bytes) == 40
+  // memmove((void*)(p->trapframe)+40, (void*)(p->trapframe_bak)+40, sizeof(struct trapframe)-40);
+  // p->trapframe->epc = p->trapframe_bak->epc;
+  // Actually these 4 kernel_* entries don't matter. So just copy all the trapframe.
+  *(p->trapframe) = *(p->trapframe_bak);
+  p->alarm_processing = 0;  
+  return p->trapframe->a0;
+}
