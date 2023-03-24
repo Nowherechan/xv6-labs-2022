@@ -328,6 +328,9 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
       panic("uvmcopy: page not present");
 
     // change the flags
+    if (*pte & PTE_W) {
+      *pte |= PTE_CW;
+    }
     *pte |= PTE_C;
     *pte &= ~PTE_W;
 
@@ -492,8 +495,11 @@ copy_writable_page(pagetable_t pagetable, uint64 va)
   char * mem;
   uint flag;
   
-  // test PTE_C flag
+  // test PTE_C and PTE_CW flag
   if (!(*pte & PTE_C)) {
+    return -1;
+  }
+  if (!(*pte & PTE_CW)) {
     return -1;
   }
 
