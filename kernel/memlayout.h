@@ -47,6 +47,9 @@
 #define KERNBASE 0x80000000L
 #define PHYSTOP (KERNBASE + 128*1024*1024)
 
+// Physical Page Number Range, for cow, lab 5
+#define PPNRANGE (128*1024*1024 >> 12)
+
 // map the trampoline page to the highest address,
 // in both user and kernel space.
 #define TRAMPOLINE (MAXVA - PGSIZE)

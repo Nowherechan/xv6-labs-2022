@@ -14,6 +14,8 @@ extern char trampoline[], uservec[], userret[];
 // in kernelvec.S, calls kerneltrap().
 void kernelvec();
 
+void do_page_fault();
+
 extern int devintr();
 
 void
@@ -67,6 +69,8 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
+  } else if(r_scause() == 12 || r_scause() == 13 || r_scause() == 15){
+    do_page_fault();
   } else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
@@ -81,6 +85,27 @@ usertrap(void)
     yield();
 
   usertrapret();
+}
+
+void 
+do_page_fault()
+{
+  /* only process store page fault, r_scause == 15 */
+  uint64 type = r_scause();
+  struct proc *p = myproc();
+  if (type == 12) {
+    panic("instruction page fault");
+  } else if (type == 13) {
+    panic("load page fault");
+  }
+
+  uint64 va = r_stval();
+  pagetable_t pagetable = p->pagetable;
+  if (copy_writable_page(pagetable, va) != 0) {
+    kill(p->pid);
+  }
+  if(killed(p))
+    exit(-1);
 }
 
 //

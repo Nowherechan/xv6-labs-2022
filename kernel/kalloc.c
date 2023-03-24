@@ -11,8 +11,12 @@
 
 void freerange(void *pa_start, void *pa_end);
 
+void ppnref_init();
+
 extern char end[]; // first address after kernel.
                    // defined by kernel.ld.
+
+extern uint8 ppn_ref[];
 
 struct run {
   struct run *next;
@@ -23,11 +27,22 @@ struct {
   struct run *freelist;
 } kmem;
 
+struct spinlock ppn_ref_lock;
+
 void
 kinit()
 {
   initlock(&kmem.lock, "kmem");
+  initlock(&ppn_ref_lock, "ppn_ref");
   freerange(end, (void*)PHYSTOP);
+  ppnref_init();
+}
+
+void ppnref_init()
+{
+  for (uint32 i = 0; i < PPNRANGE; i++) {
+    ppn_ref[i] = 0;
+  }
 }
 
 void
@@ -51,6 +66,16 @@ kfree(void *pa)
   if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
     panic("kfree");
 
+  // Before freeing, check the ppn_ref
+  acquire(&ppn_ref_lock);
+  if (ppn_ref[((uint64)pa-(uint64)end)>>12] > 0) {
+    ppn_ref[((uint64)pa-(uint64)end)>>12] -= 1;
+    release(&ppn_ref_lock);
+    return;
+  }
+  release(&ppn_ref_lock);
+
+  // ppn_ref[((uint64)pa - (uint64)end)>>12] equals to 0, should be freed
   // Fill with junk to catch dangling refs.
   memset(pa, 1, PGSIZE);
 

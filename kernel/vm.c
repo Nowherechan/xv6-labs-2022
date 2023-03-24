@@ -5,6 +5,16 @@
 #include "riscv.h"
 #include "defs.h"
 #include "fs.h"
+#include "spinlock.h"
+
+// ppn_ref records the ref nums
+// of the physical pages, and one
+// physical page can be freed when
+// its ppn_ref equals to 0.
+uint8 ppn_ref[PPNRANGE];
+extern struct spinlock ppn_ref_lock;
+
+extern char end[];
 
 /*
  * the kernel's page table.
@@ -308,22 +318,32 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   pte_t *pte;
   uint64 pa, i;
   uint flags;
-  char *mem;
+  // char *mem;
 
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
       panic("uvmcopy: pte should exist");
     if((*pte & PTE_V) == 0)
       panic("uvmcopy: page not present");
+
+    // change the flags
+    *pte |= PTE_C;
+    *pte &= ~PTE_W;
+
     pa = PTE2PA(*pte);
-    flags = PTE_FLAGS(*pte);
+    flags = (PTE_FLAGS(*pte));
+    /*
     if((mem = kalloc()) == 0)
       goto err;
     memmove(mem, (char*)pa, PGSIZE);
-    if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
+    */
+    if(mappages(new, i, PGSIZE, pa, flags) != 0){
+      /*
       kfree(mem);
+      */
       goto err;
     }
+    ppn_ref_inc(pa);
   }
   return 0;
 
@@ -436,4 +456,61 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   } else {
     return -1;
   }
+}
+
+int
+copy_writable_page(pagetable_t pagetable, uint64 va)
+{
+  pte_t *pte = walk(pagetable, va, 0);
+  uint64 pa = PTE2PA(*pte);
+  char * mem;
+  uint flag;
+  
+  // test PTE_C flag
+  if (!(*pte & PTE_C)) {
+    return -1;
+  }
+
+  if (ppn_ref[(pa - (uint64)end)>>12] == 0) {
+    *pte |= PTE_W;
+    *pte &= ~PTE_C;
+    return 0;
+  }
+
+  // pa is referenced
+  if ((mem = kalloc()) == 0) {
+    return -1;
+  }
+
+  va = PGROUNDDOWN(va);
+  flag = PTE_FLAGS(*pte);
+  flag |= PTE_W;
+  flag &= ~PTE_C;
+  memmove(mem, (void*)pa, PGSIZE);
+  uvmunmap(pagetable, va, 1, 1);
+  mappages(pagetable, va, PGSIZE, (uint64)mem, flag);
+
+  return 0;
+}
+
+uint8
+ppn_ref_inc(uint64 pa)
+{
+  uint8 ret;
+  acquire(&ppn_ref_lock);
+  ppn_ref[(pa - (uint64)end) >> 12] += 1;
+  ret = ppn_ref[(pa - (uint64)end) >> 12];
+  release(&ppn_ref_lock);
+  return ret;
+}
+
+uint8
+ppn_ref_dec(uint64 pa)
+{
+  uint8 ret;
+  acquire(&ppn_ref_lock);
+  ppn_ref[(pa - (uint64)end) >> 12] -= 1;
+  ret = ppn_ref[(pa - (uint64)end) >> 12];
+  release(&ppn_ref_lock);
+  return ret;
 }
