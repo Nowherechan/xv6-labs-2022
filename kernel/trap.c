@@ -94,10 +94,15 @@ do_page_fault()
   uint64 type = r_scause();
   struct proc *p = myproc();
   if (type == 12) {
-    panic("instruction page fault");
+    //printf("instruction page fault\n");
+    setkilled(p);
   } else if (type == 13) {
-    panic("load page fault");
+    //printf("load page fault\n");
+    setkilled(p);
   }
+
+  if(killed(p))
+    exit(-1);
 
   uint64 va = r_stval();
   pagetable_t pagetable = p->pagetable;
