@@ -482,6 +482,12 @@ int
 copy_writable_page(pagetable_t pagetable, uint64 va)
 {
   pte_t *pte = walk(pagetable, va, 0);
+
+  // guard
+  if (pte == 0) {
+    return -1;
+  }
+
   uint64 pa = PTE2PA(*pte);
   char * mem;
   uint flag;
