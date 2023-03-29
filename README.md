@@ -9,3 +9,4 @@ This repo contains my solution to the labs for MIT's 6.S081 course.
 - [Lab Page Tables](./reports/pgtbl.md)
 - [Lab Traps](./reports/traps.md)
 - [Lab Copy on-write](./reports/cow.md)
+- [Lab Multithreading](./reports/thread.md)
