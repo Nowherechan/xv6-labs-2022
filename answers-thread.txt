@@ -1,0 +1,5 @@
+> Why are there missing keys with 2 threads, but not with 1 thread?
+
+When two threads insert two new entries into one bucket at the same time,
+the next pointer of the new entry the later thread creates should point to the one the first thread creates,
+but it might point to the former head instead of the newer head.
