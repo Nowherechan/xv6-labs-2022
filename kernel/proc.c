@@ -454,6 +454,8 @@ scheduler(void)
 
     for(p = proc; p < &proc[NPROC]; p++) {
       acquire(&p->lock);
+      if(p->state == SLEEPING) {
+      }
       if(p->state == RUNNABLE) {
         // Switch to chosen process.  It is the process's job
         // to release its lock and then reacquire it
@@ -483,6 +485,7 @@ sched(void)
 {
   int intena;
   struct proc *p = myproc();
+  printf("sched happeds\n");
 
   if(!holding(&p->lock))
     panic("sched p->lock");
