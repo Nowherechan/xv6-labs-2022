@@ -11,3 +11,4 @@ This repo contains my solution to the labs for MIT's 6.S081 course.
 - [Lab Copy on-write](./reports/cow.md)
 - [Lab Multithreading](./reports/thread.md)
 - [Lab network driver](./reports/net.md)
+- [Lab Lock](./reports/lock.md)
