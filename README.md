@@ -1,4 +1,4 @@
-# cv6-labs-2022
+# xv6-labs-2022
 
 This repo contains my solution to the labs for MIT's 6.S081 course.
 
