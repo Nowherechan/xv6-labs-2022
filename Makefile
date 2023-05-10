@@ -62,7 +62,7 @@ endif
 
 # riscv64-unknown-elf- or riscv64-linux-gnu-
 # perhaps in /opt/riscv/bin
-#TOOLPREFIX = 
+#TOOLPREFIX =
 
 # Try to infer the correct TOOLPREFIX if not set
 ifndef TOOLPREFIX
@@ -213,6 +213,11 @@ UPROGS += \
 	$U/_cowtest
 endif
 
+ifeq ($(LAB), mmap)
+UPROGS += \
+	$U/_mmaptest
+endif
+
 ifeq ($(LAB),thread)
 UPROGS += \
 	$U/_uthread
@@ -265,7 +270,7 @@ fs.img: mkfs/mkfs README $(UEXTRA) $(UPROGS)
 
 -include kernel/*.d user/*.d
 
-clean: 
+clean:
 	rm -f *.tex *.dvi *.idx *.aux *.log *.ind *.ilg \
 	*/*.o */*.d */*.asm */*.sym \
 	$U/initcode $U/initcode.out $K/kernel fs.img \
