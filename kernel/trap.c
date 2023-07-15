@@ -5,14 +5,27 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
+#include "sleeplock.h"
+#include "fs.h"
+#include "file.h"
+#include "fcntl.h"
+
 
 struct spinlock tickslock;
 uint ticks;
 
 extern char trampoline[], uservec[], userret[];
 
+extern struct vma {
+  uint64 pid, addr, len, permission, offset, valid;
+  struct file * filep;
+} vma[VMASIZE];
+
+extern struct spinlock vma_lock;
 // in kernelvec.S, calls kerneltrap().
 void kernelvec();
+
+void do_page_fault();
 
 extern int devintr();
 
@@ -20,6 +33,7 @@ void
 trapinit(void)
 {
   initlock(&tickslock, "time");
+  initlock(&vma_lock, "vma lock");
 }
 
 // set up to take exceptions and traps while in the kernel.
@@ -46,10 +60,10 @@ usertrap(void)
   w_stvec((uint64)kernelvec);
 
   struct proc *p = myproc();
-  
+
   // save user program counter.
   p->trapframe->epc = r_sepc();
-  
+
   if(r_scause() == 8){
     // system call
 
@@ -65,6 +79,8 @@ usertrap(void)
     intr_on();
 
     syscall();
+  } else if (r_scause() == 13 || r_scause() == 15) { //
+    do_page_fault();
   } else if((which_dev = devintr()) != 0){
     // ok
   } else {
@@ -109,7 +125,7 @@ usertrapret(void)
 
   // set up the registers that trampoline.S's sret will use
   // to get to user space.
-  
+
   // set S Previous Privilege mode to User.
   unsigned long x = r_sstatus();
   x &= ~SSTATUS_SPP; // clear SPP to 0 for user mode
@@ -122,7 +138,7 @@ usertrapret(void)
   // tell trampoline.S the user page table to switch to.
   uint64 satp = MAKE_SATP(p->pagetable);
 
-  // jump to userret in trampoline.S at the top of memory, which 
+  // jump to userret in trampoline.S at the top of memory, which
   // switches to the user page table, restores user registers,
   // and switches to user mode with sret.
   uint64 trampoline_userret = TRAMPOLINE + (userret - trampoline);
@@ -131,14 +147,14 @@ usertrapret(void)
 
 // interrupts and exceptions from kernel code go here via kernelvec,
 // on whatever the current kernel stack is.
-void 
+void
 kerneltrap()
 {
   int which_dev = 0;
   uint64 sepc = r_sepc();
   uint64 sstatus = r_sstatus();
   uint64 scause = r_scause();
-  
+
   if((sstatus & SSTATUS_SPP) == 0)
     panic("kerneltrap: not from supervisor mode");
   if(intr_get() != 0)
@@ -208,7 +224,7 @@ devintr()
     if(cpuid() == 0){
       clockintr();
     }
-    
+
     // acknowledge the software interrupt by clearing
     // the SSIP bit in sip.
     w_sip(r_sip() & ~2);
@@ -219,3 +235,71 @@ devintr()
   }
 }
 
+int find_mmaped_vma_idx(uint64 pid, uint64 va) {
+  for (int i = 0; i < VMASIZE; i++) {
+    if (!vma[i].valid)
+      continue;
+    if (vma[i].pid != pid)
+      continue;
+    if (vma[i].addr > va)
+      continue;
+    if (vma[i].addr + vma[i].len <= va)
+      continue;
+
+    return i;
+  }
+  return -1;
+}
+
+void
+do_page_fault()
+{
+  // print vm
+  vmprint(myproc()->pagetable, 0);
+
+  // judge permissions
+
+  // test mmap
+  uint64 pid = myproc()->pid;
+  uint64 va = r_stval();
+
+  int vma_idx = find_mmaped_vma_idx(pid, va);
+  if (vma_idx == -1) {
+    goto seg_fault;
+  }
+
+  struct file* filep = vma[vma_idx].filep;
+  uint64 pa = (uint64)kalloc();
+  // we wish pa to be filled with junk ZERO
+  memset((char*)pa, 0, PGSIZE);
+
+  if (!pa) {
+    printf("out of memory\n process %d killed\n", pid);
+    goto seg_fault;
+  }
+
+  uint64 offset = va - vma[vma_idx].addr + vma[vma_idx].offset;
+  begin_op();
+  ilock(filep->ip);
+  readi(filep->ip, 0, pa, offset, PGSIZE);
+  iunlock(filep->ip);
+  end_op();
+  // prots to pte_flags
+  uint64 pte_flags = PTE_U;
+  if (vma[vma_idx].permission & PROT_READ)
+    pte_flags |= PTE_R;
+  if (vma[vma_idx].permission & PROT_WRITE)
+    pte_flags |= PTE_W;
+  if (vma[vma_idx].permission & PROT_EXEC)
+    pte_flags |= PTE_X;
+  if (mappages(myproc()->pagetable, va, PGSIZE, pa, pte_flags)) {
+    printf("map error!!! va: %p\n", va);
+  }
+  // printf("map success!!! va: %p, flags: %p\n", va, pte_flags);
+  return;
+
+seg_fault:
+  printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), myproc()->pid);
+  printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
+  setkilled(myproc());
+}

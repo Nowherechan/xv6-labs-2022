@@ -5,6 +5,11 @@
 #include "riscv.h"
 #include "defs.h"
 #include "fs.h"
+#include "spinlock.h"
+#include "proc.h"
+#include "sleeplock.h"
+#include "file.h"
+#include "fcntl.h"
 
 /*
  * the kernel's page table.
@@ -14,6 +19,14 @@ pagetable_t kernel_pagetable;
 extern char etext[];  // kernel.ld sets this to end of kernel code.
 
 extern char trampoline[]; // trampoline.S
+
+// mmap virtual memory area
+struct vma {
+  uint64 pid, addr, len, permission, offset, valid;
+  struct file * filep;
+} vma[VMASIZE];
+
+struct spinlock vma_lock;
 
 // Make a direct-map page table for the kernel.
 pagetable_t
@@ -438,12 +451,178 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   }
 }
 
+void
+clear_vma(struct vma *v)
+{
+  v->addr   = 0;
+  v->filep  = 0;
+  v->len    = 0;
+  v->offset = 0;
+  v->pid    = 0;
+  v->valid  = 0;
+  v->permission = 0;
+}
+
+void
+vmprint(pagetable_t pagetable, int level)
+{
+  if (!level)
+    printf("page table %p\n", pagetable);
+
+  // there are 2^9 = 512 PTEs in a page table.
+  for(int i = 0; i < 512; i++) {
+    pte_t pte = pagetable[i];
+    if (pte & PTE_V) {
+      uint64 child = PTE2PA(pte);
+      for (int j = level+1; j > 0; j--) {
+        printf(" ..");
+      }
+      printf("%d: pte %p pa %p\n", i, pte, child);
+      if ((pte & (PTE_R|PTE_W|PTE_X)) == 0) {
+        // this PTE points to a lower-level page table.
+        vmprint((pagetable_t)child, level+1);
+      }
+    }
+  }
+}
+
 uint64
 sys_mmap() {
+
+  struct proc *p = myproc();
+
+  uint64 va, length, prot, flags, fd, offset;
+  argaddr(0, &va);
+  argaddr(1, &length);
+  argaddr(2, &prot);
+  argaddr(3, &flags);
+  argaddr(4, &fd);
+  argaddr(5, &offset);
+
+  // judge permission
+  if (prot & PROT_READ && !p->ofile[fd]->readable) {
+    printf("flags to readable but not file\n");
+    return -1;
+  }
+  if (prot & PROT_WRITE
+  && !p->ofile[fd]->writable
+  && !(flags & MAP_PRIVATE)) {
+    printf("flags to writable but not file\n");
+    return -1;
+  }
+
+  // let mmap decide va
+  if (va == 0) {
+    va = p->sz;
+    p->sz += PGROUNDUP(va + length);
+  }
+
+  // find_mmaped_vma_idx
+  int vma_idx = find_mmaped_vma_idx(p->pid, va);
+  if (vma_idx == -1)
+    goto new_vma;
+
+  // modify tmp vma
+  // TODO
+  printf("Ah! Here is MODIFY TMP VMA! Under construction!\n");
+  return -1;
+  // no way!
+
+new_vma:
+  acquire(&vma_lock);
+  for (int i = 0; i < VMASIZE; i++) {
+    if (!vma[i].valid) {
+      vma[i].pid = p->pid;
+      vma[i].addr = va;
+      vma[i].len = length;
+      vma[i].permission = (flags << 3) | prot;
+      vma[i].offset = offset;
+      vma[i].valid = 1;
+      vma[i].filep = p->ofile[fd];
+      release(&vma_lock);
+      return va;
+    }
+  }
+  release(&vma_lock);
+
   return -1;
 }
 
 uint64
+write_back_to_file(struct vma *v, uint64 va, uint64 len) {
+  uint64 pa = walkaddr(myproc()->pagetable, va);
+  begin_op();
+  ilock(v->filep->ip);
+  writei(v->filep->ip, 0, pa, v->offset + va - v->addr, len);
+  iunlock(v->filep->ip);
+  printf("finish write file!!\n");
+  end_op();
+  return 0;
+}
+
+uint64
 sys_munmap() {
+  printf("here! sys_munmap!!\n");
+  struct proc *p = myproc();
+
+  uint64 va, length;
+  argaddr(0, &va);
+  argaddr(1, &length);
+
+  int vma_idx = find_mmaped_vma_idx(p->pid, va);
+  struct vma *v = vma + vma_idx;
+
+  // write back to file
+  if (v->permission & (MAP_SHARED << 3)) {
+    write_back_to_file(v, va, length);
+  }
+
+  acquire(&vma_lock);
+  if (v->addr == va) {
+    if (v->len == length) {
+      // fully unmap
+      clear_vma(v);
+      printf("munmap: fully clear!\n");
+    } else {
+      // modify start point
+      v->addr += length;
+      printf("munmap: modify start point!\n");
+    }
+  } else {
+    if (v->addr + v->len == va + length) {
+      // end point is the same
+      v->len -= length;
+      printf("munmap: end point is the same!\n");
+    }
+    else {
+      // dig a hole
+      printf("munmap: dig a hole!\n");
+      goto new_vma;
+    }
+  }
+  release(&vma_lock);
+  return 0;
+
+new_vma:
+
+  uint64 nva  = va + length;
+  uint64 nlen = v->len + v->addr - nva;
+  v->len = va - v->addr;
+
+  for (int i = 0; i < VMASIZE; i++) {
+    if (!vma[i].valid) {
+      vma[i].pid = p->pid;
+      vma[i].addr = nva;
+      vma[i].len = nlen;
+      vma[i].permission = v->permission;
+      vma[i].offset = v->offset + v->len;
+      vma[i].valid = 1;
+      vma[i].filep = v->filep;
+      release(&vma_lock);
+      return 0;
+    }
+  }
+
+  release(&vma_lock);
   return -1;
 }
