@@ -24,7 +24,7 @@
 #define min(a, b) ((a) < (b) ? (a) : (b))
 // there should be one superblock per disk device, but we run with
 // only one device
-struct superblock sb; 
+struct superblock sb;
 
 // Read the super block.
 static void
@@ -182,7 +182,7 @@ void
 iinit()
 {
   int i = 0;
-  
+
   initlock(&itable.lock, "itable");
   for(i = 0; i < NINODE; i++) {
     initsleeplock(&itable.inode[i].lock, "inode");
@@ -295,8 +295,13 @@ ilock(struct inode *ip)
   struct buf *bp;
   struct dinode *dip;
 
-  if(ip == 0 || ip->ref < 1)
+  if(ip == 0 || ip->ref < 1) {
+    printf("ip = %p\n", ip);
+    printf("ip = %p\n", ip->valid);
+    printf("ip = %p\n", ip->ref);
+
     panic("ilock");
+  }
 
   acquiresleep(&ip->lock);
 

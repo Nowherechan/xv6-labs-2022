@@ -243,7 +243,7 @@ int find_mmaped_vma_idx(uint64 pid, uint64 va) {
       continue;
     if (vma[i].addr > va)
       continue;
-    if (vma[i].addr + vma[i].len <= va)
+    if (vma[i].addr + vma[i].len < va)
       continue;
 
     return i;
@@ -255,7 +255,7 @@ void
 do_page_fault()
 {
   // print vm
-  vmprint(myproc()->pagetable, 0);
+  // vmprint(myproc()->pagetable, 0);
 
   // judge permissions
 
@@ -279,11 +279,13 @@ do_page_fault()
   }
 
   uint64 offset = va - vma[vma_idx].addr + vma[vma_idx].offset;
+  idup(filep->ip);
   begin_op();
   ilock(filep->ip);
   readi(filep->ip, 0, pa, offset, PGSIZE);
   iunlock(filep->ip);
   end_op();
+  iput(filep->ip);
   // prots to pte_flags
   uint64 pte_flags = PTE_U;
   if (vma[vma_idx].permission & PROT_READ)

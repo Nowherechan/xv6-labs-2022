@@ -540,6 +540,9 @@ new_vma:
       vma[i].valid = 1;
       vma[i].filep = p->ofile[fd];
       release(&vma_lock);
+
+      filedup(p->ofile[fd]);
+
       return va;
     }
   }
@@ -550,27 +553,55 @@ new_vma:
 
 uint64
 write_back_to_file(struct vma *v, uint64 va, uint64 len) {
+
   uint64 pa = walkaddr(myproc()->pagetable, va);
-  begin_op();
-  ilock(v->filep->ip);
-  writei(v->filep->ip, 0, pa, v->offset + va - v->addr, len);
-  iunlock(v->filep->ip);
-  printf("finish write file!!\n");
-  end_op();
+  if (!pa) {
+    // not mapped into memory
+    return 0;
+  }
+  int max = ((MAXOPBLOCKS-1-1-2) / 2) * BSIZE;
+  int i = 0, r, tmpoff = v->offset + va - v->addr;
+  struct inode *ip = v->filep->ip;
+
+  while (i < len) {
+    int n1 = len - i;
+    if (n1 > max)
+      n1 = max;
+
+    begin_op();
+    ilock(ip);
+    if ((r = writei(ip, 0, pa+i, tmpoff, n1)) > 0)
+      tmpoff += r;
+    iunlock(ip);
+    end_op();
+
+    if (r != n1) {
+      // error from writei
+      break;
+    }
+    i += r;
+  }
+  v->filep->off = v->filep->off > tmpoff ? v->filep->off : tmpoff;
+
   return 0;
 }
 
 uint64
 sys_munmap() {
-  printf("here! sys_munmap!!\n");
+  // printf("here! sys_munmap!!\n");
   struct proc *p = myproc();
+
 
   uint64 va, length;
   argaddr(0, &va);
   argaddr(1, &length);
 
   int vma_idx = find_mmaped_vma_idx(p->pid, va);
+  if (vma_idx == -1) {
+    return -1;
+  }
   struct vma *v = vma + vma_idx;
+  struct file * fp = v->filep;
 
   // write back to file
   if (v->permission & (MAP_SHARED << 3)) {
@@ -583,6 +614,7 @@ sys_munmap() {
       // fully unmap
       clear_vma(v);
       printf("munmap: fully clear!\n");
+      goto close_filep;
     } else {
       // modify start point
       v->addr += length;
@@ -619,10 +651,18 @@ new_vma:
       vma[i].valid = 1;
       vma[i].filep = v->filep;
       release(&vma_lock);
+      filedup(v->filep);
       return 0;
     }
   }
+  goto error;
 
+close_filep:
+  release(&vma_lock);
+  fileclose(fp);
+  return 0;
+
+error:
   release(&vma_lock);
   return -1;
 }
