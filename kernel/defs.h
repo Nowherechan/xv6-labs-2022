@@ -8,6 +8,7 @@ struct spinlock;
 struct sleeplock;
 struct stat;
 struct superblock;
+struct vma;
 
 // bio.c
 void            binit(void);
@@ -175,6 +176,11 @@ int             copyout(pagetable_t, uint64, char *, uint64);
 int             copyin(pagetable_t, char *, uint64, uint64);
 int             copyinstr(pagetable_t, char *, uint64, uint64);
 void            vmprint(pagetable_t, int);
+void            vmaprint();
+uint64          write_back_to_file(struct vma *, uint64, uint64);
+void            uvmunmap_if_mapped(pagetable_t, uint64, uint64, int);
+int             area_uvm_copy_if_mapped(pagetable_t, pagetable_t, uint64, uint64);
+void            clear_vma(struct vma *);
 
 // plic.c
 void            plicinit(void);

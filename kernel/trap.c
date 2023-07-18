@@ -243,7 +243,7 @@ int find_mmaped_vma_idx(uint64 pid, uint64 va) {
       continue;
     if (vma[i].addr > va)
       continue;
-    if (vma[i].addr + vma[i].len < va)
+    if (vma[i].addr + vma[i].len <= va)
       continue;
 
     return i;
@@ -255,7 +255,9 @@ void
 do_page_fault()
 {
   // print vm
-  // vmprint(myproc()->pagetable, 0);
+  printf("=== PID = %d ===\n", myproc()->pid);
+  //vmprint(myproc()->pagetable, 0);
+  vmaprint();
 
   // judge permissions
 

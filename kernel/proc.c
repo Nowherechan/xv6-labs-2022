@@ -5,6 +5,7 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
+#include "fcntl.h"
 
 struct cpu cpus[NCPU];
 
@@ -17,6 +18,13 @@ struct spinlock pid_lock;
 
 extern void forkret(void);
 static void freeproc(struct proc *p);
+
+extern struct vma {
+  uint64 pid, addr, len, permission, offset, valid;
+  struct file * filep;
+} vma[VMASIZE];
+
+extern struct spinlock vma_lock;
 
 extern char trampoline[]; // trampoline.S
 
@@ -33,7 +41,7 @@ void
 proc_mapstacks(pagetable_t kpgtbl)
 {
   struct proc *p;
-  
+
   for(p = proc; p < &proc[NPROC]; p++) {
     char *pa = kalloc();
     if(pa == 0)
@@ -48,7 +56,7 @@ void
 procinit(void)
 {
   struct proc *p;
-  
+
   initlock(&pid_lock, "nextpid");
   initlock(&wait_lock, "wait_lock");
   for(p = proc; p < &proc[NPROC]; p++) {
@@ -93,7 +101,7 @@ int
 allocpid()
 {
   int pid;
-  
+
   acquire(&pid_lock);
   pid = nextpid;
   nextpid = nextpid + 1;
@@ -162,6 +170,7 @@ freeproc(struct proc *p)
     proc_freepagetable(p->pagetable, p->sz);
   p->pagetable = 0;
   p->sz = 0;
+  p->mmap_zone = 0;
   p->pid = 0;
   p->parent = 0;
   p->name[0] = 0;
@@ -236,7 +245,7 @@ userinit(void)
 
   p = allocproc();
   initproc = p;
-  
+
   // allocate one user page and copy initcode's instructions
   // and data into it.
   uvmfirst(p->pagetable, initcode, sizeof(initcode));
@@ -294,6 +303,35 @@ fork(void)
     release(&np->lock);
     return -1;
   }
+  // printf("success\n");
+
+  // Copy mmap zone
+  for (i = 0; i < VMASIZE; i++) {
+    if (!vma[i].valid)
+      continue;
+    if (vma[i].pid != p->pid)
+      continue;
+
+    printf("!!! I found vma\n");
+
+    for (int j = 0; j < VMASIZE; j++) {
+      if (vma[j].valid)
+        continue;
+      vma[j] = vma[i];
+      vma[j].pid = np->pid;
+      filedup(vma[j].filep);
+      printf("!!! I operated idx=%d\n", j);
+
+      // copy if share
+      if (vma[i].permission & (MAP_SHARED<<3)) {
+        area_uvm_copy_if_mapped(p->pagetable, np->pagetable, vma[j].addr, vma[j].len);
+      }
+      break;
+    }
+
+
+  }
+
   np->sz = p->sz;
 
   // copy saved user registers.
@@ -360,6 +398,22 @@ exit(int status)
     }
   }
 
+  // Unmap all mmaped area
+  for (int i = 0; i < VMASIZE; i++) {
+    if (vma[i].pid == p->pid) {
+      // fully clear
+      struct vma *v = vma + i;
+      if (vma[i].permission & (MAP_SHARED << 3)) {
+        // write_back_to_file(v, v->addr, v->len);
+      }
+      uvmunmap_if_mapped(p->pagetable, v->addr, v->len / PGSIZE, 1);
+      fileclose(v->filep);
+      acquire(&vma_lock);
+      clear_vma(v);
+      release(&vma_lock);
+    }
+  }
+
   begin_op();
   iput(p->cwd);
   end_op();
@@ -372,7 +426,7 @@ exit(int status)
 
   // Parent might be sleeping in wait().
   wakeup(p->parent);
-  
+
   acquire(&p->lock);
 
   p->xstate = status;
@@ -428,7 +482,7 @@ wait(uint64 addr)
       release(&wait_lock);
       return -1;
     }
-    
+
     // Wait for a child to exit.
     sleep(p, &wait_lock);  //DOC: wait-sleep
   }
@@ -446,7 +500,7 @@ scheduler(void)
 {
   struct proc *p;
   struct cpu *c = mycpu();
-  
+
   c->proc = 0;
   for(;;){
     // Avoid deadlock by ensuring that devices can interrupt.
@@ -536,7 +590,7 @@ void
 sleep(void *chan, struct spinlock *lk)
 {
   struct proc *p = myproc();
-  
+
   // Must acquire p->lock in order to
   // change p->state and then call sched.
   // Once we hold p->lock, we can be
@@ -615,7 +669,7 @@ int
 killed(struct proc *p)
 {
   int k;
-  
+
   acquire(&p->lock);
   k = p->killed;
   release(&p->lock);

@@ -190,10 +190,37 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
     panic("uvmunmap: not aligned");
 
   for(a = va; a < va + npages*PGSIZE; a += PGSIZE){
+    //printf("uvmunmap: processing va = %p\n", a);
     if((pte = walk(pagetable, a, 0)) == 0)
       panic("uvmunmap: walk");
     if((*pte & PTE_V) == 0)
       panic("uvmunmap: not mapped");
+    if(PTE_FLAGS(*pte) == PTE_V)
+      panic("uvmunmap: not a leaf");
+    if(do_free){
+      uint64 pa = PTE2PA(*pte);
+      kfree((void*)pa);
+    }
+    *pte = 0;
+  }
+}
+
+void
+uvmunmap_if_mapped(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
+{
+  //printf("uvmunmap_if_mapped: va = %p, npages = %d\n", va, npages);
+  uint64 a;
+  pte_t *pte;
+
+  if((va % PGSIZE) != 0)
+    panic("uvmunmap: not aligned");
+
+  for(a = va; a < va + npages*PGSIZE; a += PGSIZE){
+    //printf("uvmunmap: processing va = %p\n", a);
+    if((pte = walk(pagetable, a, 0)) == 0)
+      panic("uvmunmap: walk");
+    if((*pte & PTE_V) == 0)
+      continue;
     if(PTE_FLAGS(*pte) == PTE_V)
       panic("uvmunmap: not a leaf");
     if(do_free){
@@ -324,6 +351,7 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   char *mem;
 
   for(i = 0; i < sz; i += PGSIZE){
+    //printf("Processing uvmcopy %p\n", i);
     if((pte = walk(old, i, 0)) == 0)
       panic("uvmcopy: pte should exist");
     if((*pte & PTE_V) == 0)
@@ -341,7 +369,40 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   return 0;
 
  err:
+  printf("WHY ERROR??\n");
   uvmunmap(new, 0, i / PGSIZE, 1);
+  return -1;
+}
+
+int
+area_uvm_copy_if_mapped(pagetable_t old, pagetable_t new, uint64 va, uint64 len)
+{
+  pte_t *pte;
+  uint64 pa, i, sz = va + len;
+  uint flags;
+  char *mem;
+
+  for(i = va; i < sz; i += PGSIZE){
+    //printf("Processing uvmcopy %p\n", i);
+    if((pte = walk(old, i, 0)) == 0)
+      continue;
+    if((*pte & PTE_V) == 0)
+      continue;
+    pa = PTE2PA(*pte);
+    flags = PTE_FLAGS(*pte);
+    if((mem = kalloc()) == 0)
+      goto err;
+    memmove(mem, (char*)pa, PGSIZE);
+    if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
+      kfree(mem);
+      goto err;
+    }
+  }
+  return 0;
+
+ err:
+  printf("WHY ERROR??\n");
+  uvmunmap(new, va, i / PGSIZE, 1);
   return -1;
 }
 
@@ -513,9 +574,12 @@ sys_mmap() {
 
   // let mmap decide va
   if (va == 0) {
-    va = p->sz;
-    p->sz += PGROUNDUP(va + length);
+    va = p->mmap_zone;
+    p->mmap_zone = PGROUNDUP(va + length);
+    printf("now p->mmap_zone = %p\n", p->mmap_zone);
   }
+  // print mmap
+  printf("SYS_MMAP: va=%p, len=%d\n", va, length);
 
   // find_mmaped_vma_idx
   int vma_idx = find_mmaped_vma_idx(p->pid, va);
@@ -524,6 +588,8 @@ sys_mmap() {
 
   // modify tmp vma
   // TODO
+  printf("vmaidx = %d\n", vma_idx);
+  printf("vma info: va = %p, len = %d\n", vma[vma_idx].addr, vma[vma_idx].len);
   printf("Ah! Here is MODIFY TMP VMA! Under construction!\n");
   return -1;
   // no way!
@@ -551,38 +617,42 @@ new_vma:
   return -1;
 }
 
+// FIX BUG: we mapped va to pa, not means we mapped va+PGSIZE to pa+PGSIZS
 uint64
 write_back_to_file(struct vma *v, uint64 va, uint64 len) {
+  printf("Write Back to File: va=%p, len=%d\n", va, len);
 
-  uint64 pa = walkaddr(myproc()->pagetable, va);
-  if (!pa) {
-    // not mapped into memory
-    return 0;
-  }
-  int max = ((MAXOPBLOCKS-1-1-2) / 2) * BSIZE;
-  int i = 0, r, tmpoff = v->offset + va - v->addr;
   struct inode *ip = v->filep->ip;
 
-  while (i < len) {
-    int n1 = len - i;
-    if (n1 > max)
-      n1 = max;
-
-    begin_op();
-    ilock(ip);
-    if ((r = writei(ip, 0, pa+i, tmpoff, n1)) > 0)
-      tmpoff += r;
-    iunlock(ip);
-    end_op();
-
-    if (r != n1) {
-      // error from writei
-      break;
+  for (uint64 i = va; i < va + len; i += PGSIZE) {
+    // write one page
+    uint64 pa = walkaddr(myproc()->pagetable, i);
+    if (!pa) {
+      // not mapped actually, skip
+      continue;
     }
-    i += r;
-  }
-  v->filep->off = v->filep->off > tmpoff ? v->filep->off : tmpoff;
+    printf("Actually write page: va = %p\n", va);
+    int max = ((MAXOPBLOCKS-1-1-2) / 2) * BSIZE;
+    int j = 0, r, tmpoff = v->offset + i - v->addr;
+    while (j < len) {
+      int n1 = len - j;
+      if (n1 > max)
+        n1 = max;
+      begin_op();
+      ilock(ip);
+      if ((r = writei(ip, 0, pa+j, tmpoff, n1)) > 0)
+        tmpoff += r;
+      iunlock(ip);
+      end_op();
 
+      if (r != n1) {
+        // error from writei
+        break;
+      }
+      j += r;
+    }
+    v->filep->off = v->filep->off > tmpoff ? v->filep->off : tmpoff;
+  }
   return 0;
 }
 
@@ -595,6 +665,7 @@ sys_munmap() {
   uint64 va, length;
   argaddr(0, &va);
   argaddr(1, &length);
+  printf("SYS_MUNMAP: va = %p, len = %d\n", va, length);
 
   int vma_idx = find_mmaped_vma_idx(p->pid, va);
   if (vma_idx == -1) {
@@ -607,6 +678,8 @@ sys_munmap() {
   if (v->permission & (MAP_SHARED << 3)) {
     write_back_to_file(v, va, length);
   }
+  // unmap from pagetable if mapped
+  uvmunmap_if_mapped(p->pagetable, va, length / PGSIZE, 1);
 
   acquire(&vma_lock);
   if (v->addr == va) {
@@ -618,6 +691,7 @@ sys_munmap() {
     } else {
       // modify start point
       v->addr += length;
+      v->len  -= length;
       printf("munmap: modify start point!\n");
     }
   } else {
@@ -658,6 +732,7 @@ new_vma:
   goto error;
 
 close_filep:
+  printf("file closed!\n");
   release(&vma_lock);
   fileclose(fp);
   return 0;
@@ -665,4 +740,16 @@ close_filep:
 error:
   release(&vma_lock);
   return -1;
+}
+
+void
+vmaprint()
+{
+  printf("=== VMA PRINT ===\n----------\n");
+  for (int i = 0; i < VMASIZE; i++) {
+    if (vma[i].valid == 0)
+      break;
+    printf("%d\t pid=%d\t va=%p\t len=%d\n", i, vma[i].pid, vma[i].addr, vma[i].len);
+  }
+  printf("----------\n=== END PRINT ===\n");
 }
