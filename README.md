@@ -13,3 +13,4 @@ This repo contains my solution to the labs for MIT's 6.S081 course.
 - [Lab network driver](./reports/net.md)
 - [Lab Lock](./reports/lock.md)
 - [Lab File system](./reports/fs.md)
+- [Lab mmap](./reports/mmap.md)
